@@ -1,0 +1,45 @@
+name: URL File Sync
+
+on:
+  repository_dispatch:
+    types: [url-filesync]
+
+jobs:
+  url_filesync:
+    name: URL File Sync
+    runs-on: ubuntu-latest
+    env:
+      gh_token: ${{ secrets.GH_PAT }}
+    steps:
+      - name: Setup Environment Variables
+        run: |
+          ## Change it with defined client payload
+          
+          ghw_password="${{ github.event.client_payload.ghw_password }}"
+          if [[ -n "$ghw_password" ]]; then
+              echo "::add-mask::$ghw_password"
+          fi
+          if [[ "$ghw_password" != "${{ secrets.GHW_PASSWORD }}" ]]; then
+              echo "token=" >> $GITHUB_ENV
+          fi
+          
+          # TOKEN
+          gh_token="${{ github.event.client_payload.token }}"
+          if [[ -n "$gh_token" ]]; then
+              echo "::add-mask::$gh_token"
+              echo "gh_token=$gh_token" >> $GITHUB_ENV
+          fi
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+        with:
+          repository: ${{ github.event.client_payload.repository }}
+          token: ${{ env.gh_token }}
+      - name: URL File Sync
+        run: wget ${{ github.event.client_payload.url }} -O ${{ github.event.client_payload.path }}
+      - name: Commit and Push
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "GHWorkflow - URL File Sync"
+          git add --all
+          git commit -m "Update file" -m "${{ github.event.client_payload.path }}" || echo "No changes to commit"
+          git push
