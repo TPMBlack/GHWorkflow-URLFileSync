@@ -5,11 +5,23 @@ on:
     types: [url-filesync]
 
 jobs:
+  provide_matrix_json:
+    name: Provide Matrix JSON
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get Matrix Payload
+        id: matrix
+        run: echo "::set-output name=value::${{ toJSON(github.event.client_payload.matrix) }}"
+    outputs:
+      matrix: ${{ steps.matrix.outputs.value }}
   url_filesync:
-    name: URL File Sync
+    name: URL File Sync - ${{ matrix.dst_path }}
+    needs: provide_matrix_json
+    strategy:
+      matrix: ${{ fromJson(needs.provide_matrix_json.outputs.matrix) }}
     runs-on: ubuntu-latest
     env:
-      src_token: ${{ secrets.GH_PAT }}
+      dst_token: ${{ secrets.GH_PAT }}
     steps:
       - name: Setup Environment Variables
         run: |
@@ -20,7 +32,7 @@ jobs:
               echo "::add-mask::$ghw_password"
           fi
           if [[ "$ghw_password" != "${{ secrets.GHW_PASSWORD }}" ]]; then
-              echo "src_token=" >> $GITHUB_ENV
+              echo "dst_token=null" >> $GITHUB_ENV
           fi
           
           # DST_TOKEN
@@ -30,12 +42,12 @@ jobs:
               echo "dst_token=$dst_token" >> $GITHUB_ENV
           fi
           # SRC_URL
-          src_url="${{ github.event.client_payload.src_url }}"
+          src_url="${{ matrix.src_url }}"
           if [[ -n "$src_url" ]]; then
               echo "src_uri=$src_url" >> $GITHUB_ENV
           fi
           # SRC_TOKEN
-          src_token="${{ github.event.client_payload.src_token }}"
+          src_token="${{ matrix.src_token }}"
           if [[ -n "$src_token" ]]; then
               echo "::add-mask::$src_token"
               src_url="-H 'Authorization: token $src_token' $src_url"
@@ -47,11 +59,11 @@ jobs:
           repository: ${{ github.event.client_payload.dst_repository }}
           token: ${{ env.dst_token }}
       - name: URL File Sync
-        run: curl ${{ env.src_uri }} -o ${{ github.event.client_payload.dst_path }}
+        run: curl ${{ env.src_uri }} -o ${{ matrix.dst_path }}
       - name: Commit and Push
         run: |
           git config user.email "actions@github.com"
           git config user.name "GHWorkflow - URL File Sync"
           git add --all
-          git commit -m "Update file" -m "${{ github.event.client_payload.dst_path }}" || echo "No changes to commit"
+          git commit -m "Update file" -m "${{ matrix.dst_path }}" || echo "No changes to commit"
           git push
