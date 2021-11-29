@@ -4,6 +4,9 @@ on:
   repository_dispatch:
     types: [url-filesync]
 
+concurrency:
+  group: ${{ toJSON(github.event.client_payload.matrix) }}
+
 jobs:
   provide_matrix_json:
     name: Provide Matrix JSON
@@ -12,6 +15,8 @@ jobs:
       - name: Get Matrix Payload
         id: matrix
         run: echo "::set-output name=value::${{ toJSON(github.event.client_payload.matrix) }}"
+      - name: 3 Minutes Sleep
+        run: sleep 3m
     outputs:
       matrix: ${{ steps.matrix.outputs.value }}
   url_filesync:
@@ -20,50 +25,56 @@ jobs:
     strategy:
       matrix: ${{ fromJson(needs.provide_matrix_json.outputs.matrix) }}
     runs-on: ubuntu-latest
+    concurrency: ${{ toJSON(matrix.dst_repository) }}
     env:
-      dst_token: ${{ secrets.GH_PAT }}
+      dst_repository: ${{ matrix.dst_repository }}
+      dst_path: ${{ matrix.dst_path }}
+      dst_token: ${{ matrix.dst_token }}
+      src_url: ${{ matrix.src_url }}
+      src_token: ${{ matrix.src_token }}
+      ghw_password: ${{ github.event.client_payload.ghw_password }}
     steps:
       - name: Setup Environment Variables
         run: |
-          ## Change it with defined client payload
+          ## Change it with client payload and hide sensitive information
           
-          ghw_password="${{ github.event.client_payload.ghw_password }}"
+          ghw_password="${{ env.ghw_password }}"
           if [[ -n "$ghw_password" ]]; then
               echo "::add-mask::$ghw_password"
           fi
-          if [[ "$ghw_password" != "${{ secrets.GHW_PASSWORD }}" ]]; then
-              echo "dst_token=null" >> $GITHUB_ENV
+          if [[ "$ghw_password" == "${{ secrets.GHW_PASSWORD }}" ]]; then
+              dst_token="${{ secrets.GH_PAT }}"
+              echo "dst_token=$dst_token" >> $GITHUB_ENV
           fi
           
           # DST_TOKEN
-          dst_token="${{ github.event.client_payload.dst_token }}"
+          dst_token="${{ env.dst_token }}"
           if [[ -n "$dst_token" ]]; then
               echo "::add-mask::$dst_token"
-              echo "dst_token=$dst_token" >> $GITHUB_ENV
           fi
           # SRC_URL
-          src_url="${{ matrix.src_url }}"
+          src_url="${{ env.src_url }}"
           if [[ -n "$src_url" ]]; then
               echo "src_uri=$src_url" >> $GITHUB_ENV
           fi
           # SRC_TOKEN
-          src_token="${{ matrix.src_token }}"
+          src_token="${{ env.src_token }}"
           if [[ -n "$src_token" ]]; then
               echo "::add-mask::$src_token"
-              src_url="-H 'Authorization: token $src_token' $src_url"
-              echo "src_uri=$src_url" >> $GITHUB_ENV
+              src_uri="-H 'Authorization: token $src_token' $src_url"
+              echo "src_uri=$src_uri" >> $GITHUB_ENV
           fi
       - name: Checkout Repository
         uses: actions/checkout@v2
         with:
-          repository: ${{ github.event.client_payload.dst_repository }}
+          repository: ${{ env.dst_repository }}
           token: ${{ env.dst_token }}
       - name: URL File Sync
-        run: curl ${{ env.src_uri }} -o ${{ matrix.dst_path }}
+        run: curl ${{ env.src_uri }} -o ${{ env.dst_path }}
       - name: Commit and Push
         run: |
           git config user.email "actions@github.com"
           git config user.name "GHWorkflow - URL File Sync"
           git add --all
-          git commit -m "Update file" -m "${{ matrix.dst_path }}" || echo "No changes to commit"
+          git commit -m "Update file" -m "${{ env.dst_path }}" || echo "No changes to commit"
           git push
